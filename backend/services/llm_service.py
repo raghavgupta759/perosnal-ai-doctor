@@ -253,14 +253,25 @@ class LLMService:
             max_output_tokens=1024,
         )
 
-        # Candidate model list starting with configured model, followed by all valid Gemini model identifiers
-        candidate_models = [
-            self.gemini_model,
-            "gemini-2.5-flash",
+        # ── Dynamically discover supported models for this API key ──────────
+        discovered_models = []
+        try:
+            async for m in client.aio.models.list():
+                m_name = m.name.replace("models/", "") if m.name else ""
+                # Check if model supports generation
+                actions = getattr(m, "supported_actions", []) or []
+                if m_name and ("generateContent" in actions or "generate_content" in actions or not actions):
+                    discovered_models.append(m_name)
+            print(f"[LLMService] Discovered models for API key: {discovered_models}")
+        except Exception as list_err:
+            print(f"[LLMService] models.list failed: {list_err}")
+
+        # Build candidate model list starting with configured model, then discovered models, then standard fallbacks
+        candidate_models = [self.gemini_model] + discovered_models + [
             "gemini-2.0-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-flash-001",
             "gemini-1.5-flash",
+            "gemini-2.5-flash",
+            "gemini-1.5-flash-latest",
             "gemini-1.5-pro"
         ]
         models_to_try = []
@@ -284,15 +295,15 @@ class LLMService:
             except Exception as e:
                 err_str = str(e).lower()
                 last_exception = e
-                # Retry with next model if error is 404 / NOT_FOUND / model not found
                 if ("404" in err_str or "not found" in err_str or "not_found" in err_str) and model_name != models_to_try[-1]:
-                    print(f"[LLMService] Model '{model_name}' not available (404), trying next candidate...")
+                    print(f"[LLMService] Model '{model_name}' returned 404, trying next candidate...")
                     continue
                 else:
                     raise e
 
         if last_exception:
             raise last_exception
+
 
 
     def _extract_intent(self, user_msg: str) -> dict:
@@ -351,11 +362,15 @@ def _gemini_error_message(exc: Exception) -> str:
     elif "block" in err_str or "safety" in err_str or "harm" in err_str:
         return "⚠️ Your message was flagged by safety filters. Please rephrase your question."
     elif "not found" in err_str or "404" in err_str:
-        return f"⚠️ AI resource/model error (404): {str(exc)}"
+        return (
+            "⚠️ Generative Language API is not enabled for this GCP project key (404 NOT_FOUND). "
+            "Please create a key directly at https://aistudio.google.com/apikey using 'Create API Key' -> 'Create API key in new project'."
+        )
     elif "timeout" in err_str or "deadline" in err_str:
         return "⚠️ AI response timed out. Please try again."
     else:
         return f"⚠️ AI service error: {str(exc)}"
+
 
 
 

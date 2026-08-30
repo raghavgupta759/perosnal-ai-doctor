@@ -54,7 +54,7 @@ def normalize_language_instruction(language: str) -> str:
 class LLMService:
     def __init__(self):
         self.gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
+        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash").strip()
 
     @property
     def model_name(self) -> str:
@@ -65,6 +65,7 @@ class LLMService:
         if self.gemini_key:
             return f"Gemini API ({self.gemini_model})"
         return "No AI provider configured (GEMINI_API_KEY not set)"
+
 
     def _build_context(self, history, profile, active_diagnosis, intake_data,
                        language, report_data=None, conversation_id=None):
@@ -339,11 +340,12 @@ def _gemini_error_message(exc: Exception) -> str:
     elif "block" in err_str or "safety" in err_str or "harm" in err_str:
         return "⚠️ Your message was flagged by safety filters. Please rephrase your question."
     elif "not found" in err_str or "404" in err_str:
-        return "⚠️ AI model not found. Please set GEMINI_MODEL to 'gemini-1.5-flash' on Render."
+        return f"⚠️ AI resource/model error (404): {str(exc)}"
     elif "timeout" in err_str or "deadline" in err_str:
         return "⚠️ AI response timed out. Please try again."
     else:
         return f"⚠️ AI service error: {str(exc)}"
+
 
 
 

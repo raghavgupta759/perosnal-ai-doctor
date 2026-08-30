@@ -259,21 +259,28 @@ class LLMService:
             async for m in await client.aio.models.list():
                 m_name = m.name.replace("models/", "") if m.name else ""
                 actions = getattr(m, "supported_actions", []) or []
-                if m_name and ("generateContent" in actions or "generate_content" in actions or not actions):
-                    discovered_models.append(m_name)
-            print(f"[LLMService] Discovered models for API key: {discovered_models}")
+                # Skip non-text/specialized models
+                skip_keywords = ["tts", "image", "lyria", "transcribe", "robotics", "computer-use", "clip"]
+                if m_name and not any(k in m_name.lower() for k in skip_keywords):
+                    if "generateContent" in actions or "generate_content" in actions or not actions:
+                        discovered_models.append(m_name)
+            print(f"[LLMService] Text-capable models discovered: {discovered_models}")
         except Exception as list_err:
             print(f"[LLMService] models.list failed: {list_err}")
 
-
-        # Build candidate model list starting with configured model, then discovered models, then standard fallbacks
-        candidate_models = [self.gemini_model] + discovered_models + [
+        # Prioritize standard text models
+        preferred_defaults = [
+            self.gemini_model,
+            "gemini-3.6-flash",
+            "gemini-3.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-3-flash-preview",
             "gemini-2.0-flash",
-            "gemini-1.5-flash",
-            "gemini-2.5-flash",
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro"
+            "gemini-1.5-flash"
         ]
+        candidate_models = preferred_defaults + discovered_models
         models_to_try = []
         for m in candidate_models:
             if m and m not in models_to_try:
@@ -295,11 +302,16 @@ class LLMService:
             except Exception as e:
                 err_str = str(e).lower()
                 last_exception = e
-                if ("404" in err_str or "not found" in err_str or "not_found" in err_str) and model_name != models_to_try[-1]:
-                    print(f"[LLMService] Model '{model_name}' returned 404, trying next candidate...")
+                # Retry with next model if error is 404 or bad request due to unsupported modality/moditurn
+                if ("404" in err_str or "not found" in err_str or "not_found" in err_str or "modality" in err_str or "multiturn" in err_str) and model_name != models_to_try[-1]:
+                    print(f"[LLMService] Model '{model_name}' skipped ({e}), trying next candidate...")
                     continue
                 else:
                     raise e
+
+        if last_exception:
+            raise last_exception
+
 
         if last_exception:
             raise last_exception

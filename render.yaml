@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: personal-ai-doctor
+    runtime: python
+    # Python version — also enforced by .python-version file in repo root
+    pythonVersion: "3.12"
+
+    # Build: install deps + train ML classifier (artifacts stored at ml/model_artifacts/)
+    buildCommand: "pip install -r requirements.txt && python ml/train_classifier.py"
+
+    # Start: uvicorn with $PORT injected by Render
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+
+    # Health check — FastAPI exposes /health endpoint
+    healthCheckPath: /health
+
+    envVars:
+      # -- Ollama (Primary AI) -------------------------------------------------
+      # REQUIRED for AI chat. Set to your external Ollama server URL.
+      # Options:
+      #   - ngrok tunnel to your local PC: https://xxxx.ngrok-free.app
+      #   - Self-hosted VPS:               http://YOUR_VPS_IP:11434
+      - key: OLLAMA_BASE_URL
+        sync: false        # Set manually in Render dashboard — never commit secrets
+
+      # The Ollama model to use (must be pulled on your external Ollama server)
+      - key: DEFAULT_MODEL
+        value: gemma4:e2b
+
+      # -- Optional Cloud AI Fallbacks -----------------------------------------
+      # If set, Gemini is used instead of Ollama (no external server needed)
+      - key: GEMINI_API_KEY
+        sync: false
+
+      # If set, OpenAI is used instead of Ollama
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # -- Optional Model Overrides --------------------------------------------
+      - key: GEMINI_MODEL
+        value: gemini-1.5-flash
+
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini

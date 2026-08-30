@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ai-doctor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: personal_ai_doctor
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./reports:/app/reports
+      - ./ml/model_artifacts:/app/ml/model_artifacts
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama_service
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

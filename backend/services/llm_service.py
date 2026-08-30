@@ -226,7 +226,6 @@ class LLMService:
         history_messages = conversation[:-1]
 
         # ── Convert history to Gemini types.Content format ─────────────────
-        # Gemini uses role "model" (not "assistant")
         gemini_history = []
         for msg in history_messages:
             gemini_role = "model" if msg["role"] == "assistant" else "user"
@@ -245,10 +244,7 @@ class LLMService:
             )
         )
 
-        # ── Initialize client ──────────────────────────────────────────────
         client = genai.Client(api_key=self.gemini_key)
-
-        # ── Build generation config with system instruction ────────────────
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
             temperature=0.4,
@@ -256,15 +252,36 @@ class LLMService:
             max_output_tokens=1024,
         )
 
-        # ── Stream response via async client ──────────────────────────────
-        async for chunk in await client.aio.models.generate_content_stream(
-            model=self.gemini_model,
-            contents=gemini_history,
-            config=config,
-        ):
-            text = getattr(chunk, "text", None)
-            if text:
-                yield text
+        # Models to try: first configured model, then gemini-1.5-flash fallback if 404 occurs
+        models_to_try = [self.gemini_model]
+        if self.gemini_model != "gemini-1.5-flash":
+            models_to_try.append("gemini-1.5-flash")
+
+        last_exception = None
+        for model_name in models_to_try:
+            try:
+                print(f"[LLMService] Attempting Gemini stream with model: {model_name}")
+                async for chunk in await client.aio.models.generate_content_stream(
+                    model=model_name,
+                    contents=gemini_history,
+                    config=config,
+                ):
+                    text = getattr(chunk, "text", None)
+                    if text:
+                        yield text
+                return  # Successfully finished streaming
+            except Exception as e:
+                err_str = str(e).lower()
+                last_exception = e
+                # Only retry with fallback if error is 404 / NOT_FOUND / model not found
+                if ("404" in err_str or "not found" in err_str or "not_found" in err_str) and model_name != models_to_try[-1]:
+                    print(f"[LLMService] Model {model_name} not found, trying fallback {models_to_try[-1]}...")
+                    continue
+                else:
+                    raise e
+
+        if last_exception:
+            raise last_exception
 
     def _extract_intent(self, user_msg: str) -> dict:
         """Very light intent extraction for lab test queries."""
@@ -315,18 +332,19 @@ class LLMService:
 def _gemini_error_message(exc: Exception) -> str:
     """Convert Gemini SDK exceptions into user-friendly messages."""
     err_str = str(exc).lower()
-    if "api_key" in err_str or "invalid" in err_str or "authentication" in err_str or "credentials" in err_str:
+    if "api_key" in err_str or "invalid" in err_str or "authentication" in err_str or "credentials" in err_str or "unauthorized" in err_str:
         return "⚠️ AI authentication failed. Please verify GEMINI_API_KEY is correctly set on Render."
     elif "quota" in err_str or "resource_exhausted" in err_str or "429" in err_str:
         return "⚠️ AI rate limit reached. Please wait a moment and try again."
     elif "block" in err_str or "safety" in err_str or "harm" in err_str:
         return "⚠️ Your message was flagged by safety filters. Please rephrase your question."
-    elif "not found" in err_str or "404" in err_str or "model" in err_str:
-        return "⚠️ AI model not found. Please verify the GEMINI_MODEL environment variable on Render."
+    elif "not found" in err_str or "404" in err_str:
+        return "⚠️ AI model not found. Please set GEMINI_MODEL to 'gemini-1.5-flash' on Render."
     elif "timeout" in err_str or "deadline" in err_str:
         return "⚠️ AI response timed out. Please try again."
     else:
-        return "⚠️ AI service temporarily unavailable. Please try again in a moment."
+        return f"⚠️ AI service error: {str(exc)}"
+
 
 
 llm_service = LLMService()

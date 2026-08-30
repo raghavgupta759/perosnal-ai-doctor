@@ -256,15 +256,15 @@ class LLMService:
         # ── Dynamically discover supported models for this API key ──────────
         discovered_models = []
         try:
-            async for m in client.aio.models.list():
+            async for m in await client.aio.models.list():
                 m_name = m.name.replace("models/", "") if m.name else ""
-                # Check if model supports generation
                 actions = getattr(m, "supported_actions", []) or []
                 if m_name and ("generateContent" in actions or "generate_content" in actions or not actions):
                     discovered_models.append(m_name)
             print(f"[LLMService] Discovered models for API key: {discovered_models}")
         except Exception as list_err:
             print(f"[LLMService] models.list failed: {list_err}")
+
 
         # Build candidate model list starting with configured model, then discovered models, then standard fallbacks
         candidate_models = [self.gemini_model] + discovered_models + [
@@ -353,23 +353,21 @@ class LLMService:
 
 
 def _gemini_error_message(exc: Exception) -> str:
-    """Convert Gemini SDK exceptions into user-friendly messages."""
+    """Convert Gemini SDK exceptions into user-friendly messages with raw error details."""
     err_str = str(exc).lower()
-    if "api_key" in err_str or "invalid" in err_str or "authentication" in err_str or "credentials" in err_str or "unauthorized" in err_str:
-        return "⚠️ AI authentication failed. Please verify GEMINI_API_KEY is correctly set on Render."
+    if "api_key" in err_str or "unauthorized" in err_str:
+        return f"⚠️ AI authentication failed: {str(exc)}"
     elif "quota" in err_str or "resource_exhausted" in err_str or "429" in err_str:
-        return "⚠️ AI rate limit reached. Please wait a moment and try again."
+        return f"⚠️ AI rate limit reached (429): {str(exc)}"
     elif "block" in err_str or "safety" in err_str or "harm" in err_str:
-        return "⚠️ Your message was flagged by safety filters. Please rephrase your question."
+        return f"⚠️ Safety filter block: {str(exc)}"
     elif "not found" in err_str or "404" in err_str:
-        return (
-            "⚠️ Generative Language API is not enabled for this GCP project key (404 NOT_FOUND). "
-            "Please create a key directly at https://aistudio.google.com/apikey using 'Create API Key' -> 'Create API key in new project'."
-        )
+        return f"⚠️ AI resource/model not found (404): {str(exc)}"
     elif "timeout" in err_str or "deadline" in err_str:
-        return "⚠️ AI response timed out. Please try again."
+        return f"⚠️ AI response timed out: {str(exc)}"
     else:
         return f"⚠️ AI service error: {str(exc)}"
+
 
 
 

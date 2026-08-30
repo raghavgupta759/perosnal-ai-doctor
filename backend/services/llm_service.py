@@ -253,10 +253,20 @@ class LLMService:
             max_output_tokens=1024,
         )
 
-        # Models to try: first configured model, then gemini-1.5-flash fallback if 404 occurs
-        models_to_try = [self.gemini_model]
-        if self.gemini_model != "gemini-1.5-flash":
-            models_to_try.append("gemini-1.5-flash")
+        # Candidate model list starting with configured model, followed by all valid Gemini model identifiers
+        candidate_models = [
+            self.gemini_model,
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-flash-001",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
+        ]
+        models_to_try = []
+        for m in candidate_models:
+            if m and m not in models_to_try:
+                models_to_try.append(m)
 
         last_exception = None
         for model_name in models_to_try:
@@ -274,15 +284,16 @@ class LLMService:
             except Exception as e:
                 err_str = str(e).lower()
                 last_exception = e
-                # Only retry with fallback if error is 404 / NOT_FOUND / model not found
+                # Retry with next model if error is 404 / NOT_FOUND / model not found
                 if ("404" in err_str or "not found" in err_str or "not_found" in err_str) and model_name != models_to_try[-1]:
-                    print(f"[LLMService] Model {model_name} not found, trying fallback {models_to_try[-1]}...")
+                    print(f"[LLMService] Model '{model_name}' not available (404), trying next candidate...")
                     continue
                 else:
                     raise e
 
         if last_exception:
             raise last_exception
+
 
     def _extract_intent(self, user_msg: str) -> dict:
         """Very light intent extraction for lab test queries."""
